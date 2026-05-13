@@ -1,0 +1,175 @@
+{
+  "project_info": {
+    "project_number": "669964644237",
+    "firebase_url": "https://tastizoo-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "tastizoo",
+    "storage_bucket": "tastizoo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:669964644237:android:1e02510ddfe4b5d67457c4",
+        "android_client_info": {
+          "package_name": "com.tastizo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "669964644237-38c06rr5pf4cluo0b2d5fbmqsa0gi725.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.app",
+            "certificate_hash": "41961d33b08d1bd4bc47547cbb5a17fb810f5cd7"
+          }
+        },
+        {
+          "client_id": "669964644237-4ajl3v5abn15sgotstmddptfm14dkpbv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.app",
+            "certificate_hash": "8dc0392a013f40e545556dd7a0bfd5f2a2cdc85d"
+          }
+        },
+        {
+          "client_id": "669964644237-gbi5l23a91ntqmo6l7etfom65laaaq1h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.app",
+            "certificate_hash": "90296e5530eec7f5809355a18f7ef822491766a4"
+          }
+        },
+        {
+          "client_id": "669964644237-n9u7iass7tbepophrl9rstdubossko0t.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.app",
+            "certificate_hash": "e0aa2debc0232c9e0d695230466ef0e995e05b29"
+          }
+        },
+        {
+          "client_id": "669964644237-rqvjq11dc5m907k7b5umku7o3ldhve56.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.app",
+            "certificate_hash": "f726ec78b391f6281872f825889b89f57dd7586c"
+          }
+        },
+        {
+          "client_id": "669964644237-s2n7s7vi8lq30g3a5c32eugcirl00qbo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWdOULAskmZUUSutoJ4afJ-bsvUlOc9-4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "669964644237-s2n7s7vi8lq30g3a5c32eugcirl00qbo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "669964644237-v4ns0mmfb95go5c16i17bq78te8i46e7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tastizo.app"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:669964644237:android:c65af49876061a0f7457c4",
+        "android_client_info": {
+          "package_name": "com.tastizo.restaurantpartner"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "669964644237-5slmgegep97doi9gdnkj3ipp30vcip06.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.restaurantpartner",
+            "certificate_hash": "90296e5530eec7f5809355a18f7ef822491766a4"
+          }
+        },
+        {
+          "client_id": "669964644237-6dcnshu9ron9qqsoh1n212g3hm0jgcgs.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tastizo.restaurantpartner",
+            "certificate_hash": "f726ec78b391f6281872f825889b89f57dd7586c"
+          }
+        },
+        {
+          "client_id": "669964644237-s2n7s7vi8lq30g3a5c32eugcirl00qbo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWdOULAskmZUUSutoJ4afJ-bsvUlOc9-4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "669964644237-s2n7s7vi8lq30g3a5c32eugcirl00qbo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "669964644237-v4ns0mmfb95go5c16i17bq78te8i46e7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tastizo.app"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:669964644237:android:a5e076e83e456e727457c4",
+        "android_client_info": {
+          "package_name": "com.taztizo.deliverypartner"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "669964644237-s2n7s7vi8lq30g3a5c32eugcirl00qbo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWdOULAskmZUUSutoJ4afJ-bsvUlOc9-4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "669964644237-s2n7s7vi8lq30g3a5c32eugcirl00qbo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "669964644237-v4ns0mmfb95go5c16i17bq78te8i46e7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tastizo.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
