@@ -15,15 +15,18 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import messaging from "@react-native-firebase/messaging";
 import * as SplashScreen from "expo-splash-screen";
 import * as NavigationBar from "expo-navigation-bar";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
 const APP_URL = "https://tastizo.com";
 const APP_ROOT_URL = "https://tastizo.com/";
-const APP_START_URL = "https://tastizo.com/restaurant";
+const APP_START_URL = "https://tastizo.com/delivery";
 const FCM_SAVE_URL = `${APP_URL}/api/v1/fcm-tokens/save`;
 const FCM_PLATFORM = "android";
-const AUTH_TOKEN_STORAGE_KEY = "tastizo_auth_token";
+const AUTH_TOKEN_STORAGE_KEY = "tastizo_delivery_auth_token";
 const AUTH_TOKEN_CANDIDATE_KEYS = [
   "authToken",
   "accessToken",
@@ -36,12 +39,39 @@ const AUTH_TOKEN_CANDIDATE_KEYS = [
 ];
 const WEBVIEW_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 14; Pixel 6 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36";
+const FULLSCREEN_ROUTES = ["/login", "/otp", "/splash"];
 
 void SplashScreen.preventAutoHideAsync();
 LogBox.ignoreLogs(["A component is changing an uncontrolled input"]);
 
 const buildOrderUrl = (orderId) =>
-  `${APP_URL}/restaurant/orders?orderId=${encodeURIComponent(orderId)}`;
+  `${APP_URL}/delivery/feed?orderId=${encodeURIComponent(orderId)}`;
+
+const resolveRemoteMessageUrl = (remoteMessage) => {
+  if (!remoteMessage) {
+    return null;
+  }
+
+  const candidates = [
+    remoteMessage?.data?.url,
+    remoteMessage?.data?.deepLink,
+    remoteMessage?.notification?.android?.link,
+  ];
+
+  for (const candidate of candidates) {
+    const resolved = resolveNotificationUrl(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  const orderId = remoteMessage?.data?.orderId;
+  if (orderId) {
+    return buildOrderUrl(orderId);
+  }
+
+  return null;
+};
 
 const resolveNotificationUrl = (rawUrl) => {
   if (!rawUrl) {
@@ -56,7 +86,10 @@ const resolveNotificationUrl = (rawUrl) => {
       return buildOrderUrl(orderId);
     }
 
-    if (parsed.pathname.includes("/restaurant/orders")) {
+    if (
+      parsed.pathname.includes("/delivery/feed") ||
+      parsed.pathname.includes("/delivery/orders")
+    ) {
       return `${APP_URL}${parsed.pathname}${parsed.search}`;
     }
   } catch (_error) {
@@ -130,6 +163,98 @@ const AUTH_PROBE_SCRIPT = `
   })();
 `;
 
+const HIDE_SCROLLBAR_SCRIPT = `
+  (function() {
+    try {
+      var style = document.getElementById("tastizo-hide-scrollbar-style");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "tastizo-hide-scrollbar-style";
+        style.innerHTML = [
+          "html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; }",
+          "html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; background: transparent !important; }"
+        ].join(" ");
+        (document.head || document.documentElement).appendChild(style);
+      }
+    } catch (_error) {}
+    true;
+  })();
+`;
+
+const FULLSCREEN_ROUTE_STYLE_SCRIPT = `
+  (function() {
+    try {
+      function findPrimaryContainer() {
+        var selectors = [
+          "[data-testid='login-screen']",
+          "[data-testid='otp-screen']",
+          "#root",
+          "#__next",
+          "main",
+          "body > div",
+          "body > main"
+        ];
+
+        for (var i = 0; i < selectors.length; i++) {
+          var match = document.querySelector(selectors[i]);
+          if (match) return match;
+        }
+
+        return document.body && document.body.firstElementChild;
+      }
+
+      function collapseTopGap() {
+        var primary = findPrimaryContainer();
+        if (!primary || !document.body) return;
+
+        var rect = primary.getBoundingClientRect();
+        if (rect.top > 0) {
+          primary.style.marginTop = (-rect.top) + "px";
+        }
+
+        primary.style.paddingTop = "0";
+        primary.style.minHeight = "100vh";
+        document.body.style.paddingTop = "0";
+        document.body.style.marginTop = "0";
+      }
+
+      var style = document.getElementById("tastizo-fullscreen-route-style");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "tastizo-fullscreen-route-style";
+        style.innerHTML = [
+          "html, body { margin: 0 !important; padding: 0 !important; min-height: 100vh !important; overflow-x: hidden !important; }",
+          "body { overscroll-behavior-y: none !important; }",
+          "html { background: #ffffff !important; }",
+          "#root, #__next, main, body > div, body > main { margin-top: 0 !important; padding-top: 0 !important; min-height: 100vh !important; }",
+          "body > *:first-child, body > div:first-child, body > main:first-child { margin-top: 0 !important; padding-top: 0 !important; }",
+          "* { --sat: 0px !important; --safe-area-inset-top: 0px !important; }"
+        ].join(" ");
+        (document.head || document.documentElement).appendChild(style);
+      }
+
+      var candidates = [
+        document.getElementById("root"),
+        document.getElementById("__next"),
+        document.querySelector("main"),
+        document.body && document.body.firstElementChild
+      ].filter(Boolean);
+
+      candidates.forEach(function(node) {
+        node.style.marginTop = "0";
+        node.style.paddingTop = "0";
+        node.style.minHeight = "100vh";
+      });
+
+      collapseTopGap();
+      requestAnimationFrame(collapseTopGap);
+      setTimeout(collapseTopGap, 150);
+      setTimeout(collapseTopGap, 500);
+    } catch (_error) {}
+    true;
+  })();
+`;
+
 const normalizeAuthToken = (value) => {
   if (!value || typeof value !== "string") {
     return null;
@@ -158,7 +283,17 @@ const normalizeAuthToken = (value) => {
   return trimmed;
 };
 
-export default function App() {
+const normalizePathname = (url) => {
+  try {
+    const pathname = new URL(url).pathname.replace(/\/+$/, "");
+    return pathname || "/";
+  } catch (_error) {
+    return "";
+  }
+};
+
+function AppContent() {
+  const insets = useSafeAreaInsets();
   const webViewRef = useRef(null);
   const [canGoBack, setCanGoBack] = useState(false);
   const [sourceUrl, setSourceUrl] = useState(APP_START_URL);
@@ -170,7 +305,30 @@ export default function App() {
   const pendingFcmTokenRef = useRef(null);
   const lastSavedTokenKeyRef = useRef(null);
   const lastQueuedTokenRef = useRef(null);
+  const loginStyleAppliedRef = useRef(false);
   const webViewSource = useMemo(() => ({ uri: sourceUrl }), [sourceUrl]);
+  const activePathname = useMemo(() => normalizePathname(activeUrl), [activeUrl]);
+  const isLoginRoute = useMemo(
+    () => activePathname === "/delivery/login" || activePathname === "/login",
+    [activePathname]
+  );
+  const isFullscreenRoute = useMemo(
+    () => FULLSCREEN_ROUTES.some((route) => activePathname.includes(route)),
+    [activePathname]
+  );
+  const loginRouteInjection = useMemo(
+    () => (isFullscreenRoute ? FULLSCREEN_ROUTE_STYLE_SCRIPT : null),
+    [isFullscreenRoute]
+  );
+  const containerStyle = useMemo(
+    () => ({
+      flex: 1,
+      backgroundColor: "#239858",
+      paddingTop: 0,
+      paddingBottom: 0,
+    }),
+    []
+  );
 
   const persistAuthToken = async (token) => {
     const normalized = normalizeAuthToken(token);
@@ -267,6 +425,40 @@ export default function App() {
       lastQueuedTokenRef.current = null;
     } catch (error) {
       console.warn("FCM token save failed", error);
+    }
+  };
+
+  const requestLocationPermission = async () => {
+    if (Platform.OS !== "android") {
+      return true;
+    }
+
+    try {
+      const fineLocationGranted = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+      );
+      const coarseLocationGranted = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION
+      );
+
+      if (fineLocationGranted || coarseLocationGranted) {
+        return true;
+      }
+
+      const result = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+      ]);
+
+      return (
+        result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
+          PermissionsAndroid.RESULTS.GRANTED ||
+        result[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
+          PermissionsAndroid.RESULTS.GRANTED
+      );
+    } catch (error) {
+      console.warn("location permission request failed", error);
+      return false;
     }
   };
 
@@ -382,6 +574,12 @@ export default function App() {
   React.useEffect(() => {
     let isMounted = true;
 
+    requestLocationPermission().catch((error) => {
+      if (isMounted) {
+        console.warn("location permission setup failed", error);
+      }
+    });
+
     setupFcm().catch((error) => {
       if (isMounted) {
         console.warn("FCM setup failed", error);
@@ -405,6 +603,27 @@ export default function App() {
   }, []);
 
   React.useEffect(() => {
+    const unsubscribeNotificationOpen = messaging().onNotificationOpenedApp(
+      (remoteMessage) => {
+        const nextUrl = resolveRemoteMessageUrl(remoteMessage);
+        if (nextUrl) {
+          setSourceUrl(nextUrl);
+          setActiveUrl(nextUrl);
+        }
+      }
+    );
+
+    messaging()
+      .getInitialNotification()
+      .then((remoteMessage) => {
+        const nextUrl = resolveRemoteMessageUrl(remoteMessage);
+        if (nextUrl) {
+          setSourceUrl(nextUrl);
+          setActiveUrl(nextUrl);
+        }
+      })
+      .catch(() => {});
+
     const handleUrl = ({ url }) => {
       const nextUrl = resolveNotificationUrl(url);
       if (nextUrl) {
@@ -426,9 +645,24 @@ export default function App() {
     const subscription = Linking.addEventListener("url", handleUrl);
 
     return () => {
+      unsubscribeNotificationOpen();
       subscription.remove();
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!isFullscreenRoute) {
+      loginStyleAppliedRef.current = false;
+      return;
+    }
+
+    if (!isWebViewReady || loginStyleAppliedRef.current) {
+      return;
+    }
+
+    webViewRef.current?.injectJavaScript?.(FULLSCREEN_ROUTE_STYLE_SCRIPT);
+    loginStyleAppliedRef.current = true;
+  }, [isFullscreenRoute, isWebViewReady]);
 
   React.useEffect(() => {
     if (!isWebViewReady) {
@@ -458,10 +692,7 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: "#ffffff" }}
-      edges={["top"]}
-    >
+    <View style={containerStyle}>
       <StatusBar hidden />
       {loadError ? (
         <View
@@ -470,13 +701,13 @@ export default function App() {
             alignItems: "center",
             justifyContent: "center",
             paddingHorizontal: 24,
-            backgroundColor: "#ffffff",
+            backgroundColor: "#239858",
           }}
         >
-          <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 8, color: "#111827" }}>
+          <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 8, color: "#ffffff" }}>
             Page load failed
           </Text>
-          <Text style={{ fontSize: 14, textAlign: "center", color: "#6b7280", marginBottom: 16 }}>
+          <Text style={{ fontSize: 14, textAlign: "center", color: "#d1fae5", marginBottom: 16 }}>
             {loadError}
           </Text>
           <TouchableOpacity
@@ -495,9 +726,12 @@ export default function App() {
       <WebView
         ref={webViewRef}
         source={webViewSource}
-        style={{ flex: 1, backgroundColor: "#ffffff" }}
+        injectedJavaScriptBeforeContentLoaded={loginRouteInjection || undefined}
+        style={{ flex: 1, backgroundColor: "#239858" }}
         userAgent={WEBVIEW_USER_AGENT}
-          applicationNameForUserAgent="TastizoApp"
+        showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
+          applicationNameForUserAgent="TastizoDeliveryPartner"
           cacheEnabled
           cacheMode="LOAD_CACHE_ELSE_NETWORK"
           sharedCookiesEnabled
@@ -511,7 +745,11 @@ export default function App() {
         onLoadEnd={() => {
           setIsWebViewReady(true);
           if (webViewRef.current) {
+            webViewRef.current.injectJavaScript(HIDE_SCROLLBAR_SCRIPT);
             webViewRef.current.injectJavaScript(AUTH_PROBE_SCRIPT);
+            if (isFullscreenRoute) {
+              webViewRef.current.injectJavaScript(FULLSCREEN_ROUTE_STYLE_SCRIPT);
+            }
           }
         }}
         onMessage={handleWebViewMessage}
@@ -532,8 +770,17 @@ export default function App() {
           startInLoadingState
           setSupportMultipleWindows
           androidLayerType="hardware"
+          pullToRefreshEnabled={true}
         />
       )}
-    </SafeAreaView>
+    </View>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
   );
 }

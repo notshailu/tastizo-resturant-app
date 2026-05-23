@@ -86,7 +86,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:669964644237:android:c65af49876061a0f7457c4",
         "android_client_info": {
-          "package_name": "com.tastizo.restaurantpartner"
+          "package_name": "com.tastizo.deliverypartner"
         }
       },
       "oauth_client": [
@@ -94,7 +94,7 @@
           "client_id": "669964644237-5slmgegep97doi9gdnkj3ipp30vcip06.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.tastizo.restaurantpartner",
+            "package_name": "com.tastizo.deliverypartner",
             "certificate_hash": "90296e5530eec7f5809355a18f7ef822491766a4"
           }
         },
@@ -102,7 +102,7 @@
           "client_id": "669964644237-6dcnshu9ron9qqsoh1n212g3hm0jgcgs.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.tastizo.restaurantpartner",
+            "package_name": "com.tastizo.deliverypartner",
             "certificate_hash": "f726ec78b391f6281872f825889b89f57dd7586c"
           }
         },
@@ -127,7 +127,7 @@
               "client_id": "669964644237-v4ns0mmfb95go5c16i17bq78te8i46e7.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.tastizo.app"
+                "bundle_id": "com.tastizo.deliverypartner"
               }
             }
           ]
@@ -138,7 +138,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:669964644237:android:a5e076e83e456e727457c4",
         "android_client_info": {
-          "package_name": "com.taztizo.deliverypartner"
+          "package_name": "com.tastizo.deliverypartner"
         }
       },
       "oauth_client": [
@@ -163,7 +163,7 @@
               "client_id": "669964644237-v4ns0mmfb95go5c16i17bq78te8i46e7.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.tastizo.app"
+                "bundle_id": "com.tastizo.deliverypartner"
               }
             }
           ]
