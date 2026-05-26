@@ -10,11 +10,14 @@ import {
   TouchableOpacity,
   View,
   LogBox,
+  ScrollView,
+  RefreshControl,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import messaging from "@react-native-firebase/messaging";
 import * as SplashScreen from "expo-splash-screen";
 import * as NavigationBar from "expo-navigation-bar";
+import * as Location from "expo-location";
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
@@ -300,6 +303,8 @@ function AppContent() {
   const [activeUrl, setActiveUrl] = useState(APP_START_URL);
   const [isWebViewReady, setIsWebViewReady] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [canRefresh, setCanRefresh] = useState(true);
   const fcmTokenRef = useRef(null);
   const authTokenRef = useRef(null);
   const pendingFcmTokenRef = useRef(null);
@@ -434,28 +439,23 @@ function AppContent() {
     }
 
     try {
-      const fineLocationGranted = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-      );
-      const coarseLocationGranted = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION
-      );
+      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
 
-      if (fineLocationGranted || coarseLocationGranted) {
-        return true;
+      if (foregroundStatus !== "granted") {
+        return false;
       }
 
-      const result = await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
-      ]);
+      // Trigger the prompt to ask user to enable high GPS accuracy in device settings
+      try {
+        await Location.enableNetworkProviderAsync();
+      } catch (e) {
+        console.log("Could not enable high accuracy network provider", e);
+      }
 
-      return (
-        result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
-          PermissionsAndroid.RESULTS.GRANTED ||
-        result[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
-          PermissionsAndroid.RESULTS.GRANTED
-      );
+      // Request background location permission for high accuracy tracking while app is minimized
+      await Location.requestBackgroundPermissionsAsync();
+
+      return true;
     } catch (error) {
       console.warn("location permission request failed", error);
       return false;
@@ -723,17 +723,37 @@ function AppContent() {
           </TouchableOpacity>
         </View>
       ) : (
-      <WebView
-        ref={webViewRef}
-        source={webViewSource}
-        injectedJavaScriptBeforeContentLoaded={loginRouteInjection || undefined}
-        style={{ flex: 1, backgroundColor: "#239858" }}
-        userAgent={WEBVIEW_USER_AGENT}
+        <ScrollView
+          contentContainerStyle={{ flex: 1 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                webViewRef.current?.reload();
+              }}
+              enabled={canRefresh}
+              colors={["#ffffff"]}
+              progressBackgroundColor={"#239858"}
+            />
+          }
+        >
+          <WebView
+            ref={webViewRef}
+            source={webViewSource}
+            bounces={true}
+            onScroll={(event) => {
+              const yOffset = event.nativeEvent.contentOffset.y;
+              setCanRefresh(yOffset <= 0);
+            }}
+            injectedJavaScriptBeforeContentLoaded={loginRouteInjection || undefined}
+            style={{ flex: 1, backgroundColor: "#239858" }}
+            userAgent={WEBVIEW_USER_AGENT}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
           applicationNameForUserAgent="TastizoDeliveryPartner"
-          cacheEnabled
-          cacheMode="LOAD_CACHE_ELSE_NETWORK"
+          cacheEnabled={false}
+          cacheMode="LOAD_NO_CACHE"
           sharedCookiesEnabled
           thirdPartyCookiesEnabled
           onNavigationStateChange={(state) => {
@@ -743,6 +763,7 @@ function AppContent() {
             }
           }}
         onLoadEnd={() => {
+          setRefreshing(false);
           setIsWebViewReady(true);
           if (webViewRef.current) {
             webViewRef.current.injectJavaScript(HIDE_SCROLLBAR_SCRIPT);
@@ -770,8 +791,9 @@ function AppContent() {
           startInLoadingState
           setSupportMultipleWindows
           androidLayerType="hardware"
-          pullToRefreshEnabled={true}
+          pullToRefreshEnabled={false}
         />
+        </ScrollView>
       )}
     </View>
   );

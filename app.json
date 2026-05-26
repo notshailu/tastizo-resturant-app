@@ -4,7 +4,7 @@
     "slug": "Tastizo delivery",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/iconv2.jpeg",
+    "icon": "./assets/images/iconv2_padded_transparent.png",
     "scheme": "tastizo-delivery",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff",
-        "foregroundImage": "./assets/images/icon.png"
+        "foregroundImage": "./assets/images/icon_padded_transparent.png"
       },
       "edgeToEdgeEnabled": true,
       "googleServicesFile": "./google-services.json",
