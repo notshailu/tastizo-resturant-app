@@ -15,6 +15,8 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import messaging from "@react-native-firebase/messaging";
+import notifee, { AndroidImportance } from "@notifee/react-native";
+import ReactNativeForegroundService from "@supersami/rn-foreground-service";
 import * as SplashScreen from "expo-splash-screen";
 import * as NavigationBar from "expo-navigation-bar";
 import * as Location from "expo-location";
@@ -162,6 +164,76 @@ const AUTH_PROBE_SCRIPT = `
         }
       }
     } catch (_error) {}
+    true;
+  })();
+`;
+
+const ONLINE_STATUS_PROBE_SCRIPT = `
+  (function() {
+    try {
+      function getOnlineStatus() {
+        try {
+          var val = window.localStorage.getItem("delivery-v2-online-pref");
+          if (val) {
+            var parsed = JSON.parse(val);
+            if (parsed && parsed.state && typeof parsed.state.isOnline === "boolean") {
+              return parsed.state.isOnline;
+            }
+          }
+        } catch (e) {}
+        try {
+          var val = window.localStorage.getItem("app:isOnline");
+          if (val !== null) {
+            return val === "true" || val === true;
+          }
+        } catch (e) {}
+        return false;
+      }
+
+      function getRiderName() {
+        try {
+          var userRaw = window.localStorage.getItem("delivery_user") || window.localStorage.getItem("deliveryUser") || window.localStorage.getItem("user");
+          if (userRaw) {
+            var user = JSON.parse(userRaw);
+            var profile = user?.profile || user?.deliveryPartner || user;
+            var name = profile?.fullName || profile?.firstName || profile?.name || profile?.displayName || "";
+            if (name) return name;
+          }
+        } catch(e) {}
+        return "Delivery Partner";
+      }
+
+      function checkAndPostStatus() {
+        if (!window.ReactNativeWebView) {
+          setTimeout(checkAndPostStatus, 100);
+          return;
+        }
+        var isOnline = getOnlineStatus();
+        var riderName = getRiderName();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: "DELIVERY_STATUS",
+          status: isOnline ? "online" : "offline",
+          riderName: riderName
+        }));
+      }
+
+      // 1. Initial status post
+      checkAndPostStatus();
+
+      // 2. Intercept future changes via localStorage.setItem
+      if (!window.__statusHooked) {
+        window.__statusHooked = true;
+        var originalSetItem = window.localStorage.setItem;
+        window.localStorage.setItem = function(key, value) {
+          originalSetItem.apply(this, arguments);
+          if (key === "delivery-v2-online-pref" || key === "app:isOnline" || key === "delivery_user") {
+            setTimeout(function() {
+              checkAndPostStatus();
+            }, 50);
+          }
+        };
+      }
+    } catch (e) {}
     true;
   })();
 `;
@@ -526,6 +598,7 @@ function AppContent() {
 
     try {
       const parsed = JSON.parse(raw);
+      console.log("WebView message received:", parsed);
       if (parsed?.type === "AUTH_TOKEN" && parsed.token) {
         console.log("auth token received from WebView", parsed.source || "unknown");
         const normalized = await persistAuthToken(parsed.token);
@@ -535,6 +608,43 @@ function AppContent() {
         } else if (normalized && fcmTokenRef.current) {
           console.log("resyncing FCM token after auth token update");
           await saveFcmTokenToBackend(fcmTokenRef.current);
+        }
+      } else if (parsed?.type === "DELIVERY_STATUS") {
+        if (parsed.status === "online") {
+          if (Platform.OS === "android") {
+            const hasLocation = await requestLocationPermission();
+            const hasNotification = await requestNotificationPermission();
+            
+            if (!hasLocation || !hasNotification) {
+               console.log("Missing permissions to start Foreground Service");
+               Alert.alert("Permission Required", "Please enable Notification and Location permissions to stay online.");
+               return;
+            }
+            
+            const riderDisplayName = parsed.riderName || "Delivery Partner";
+            ReactNativeForegroundService.start({
+              id: 144,
+              title: "Tastizo Delivery",
+              message: `${riderDisplayName} is online and ready to receive orders.`,
+              icon: "ic_launcher",
+              ServiceType: "location",
+              button: false,
+              button2: false,
+              setOnlyAlertOnce: true,
+              color: "#000000",
+            });
+            ReactNativeForegroundService.add_task(() => {}, {
+              delay: 1000,
+              onLoop: true,
+              taskId: "deliveryKeepAliveTask",
+              onError: (e) => console.log("Error logging:", e),
+            });
+          }
+        } else {
+          if (Platform.OS === "android") {
+            ReactNativeForegroundService.stop();
+            ReactNativeForegroundService.remove_task("deliveryKeepAliveTask");
+          }
         }
       }
     } catch (_error) {}
@@ -574,17 +684,25 @@ function AppContent() {
   React.useEffect(() => {
     let isMounted = true;
 
-    requestLocationPermission().catch((error) => {
-      if (isMounted) {
-        console.warn("location permission setup failed", error);
+    const initializePermissions = async () => {
+      try {
+        await setupFcm();
+      } catch (error) {
+        if (isMounted) {
+          console.warn("FCM setup failed", error);
+        }
       }
-    });
 
-    setupFcm().catch((error) => {
-      if (isMounted) {
-        console.warn("FCM setup failed", error);
+      try {
+        await requestLocationPermission();
+      } catch (error) {
+        if (isMounted) {
+          console.warn("location permission setup failed", error);
+        }
       }
-    });
+    };
+
+    initializePermissions();
 
     return () => {
       isMounted = false;
@@ -600,6 +718,64 @@ function AppContent() {
     });
 
     return unsubscribe;
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribeForeground = messaging().onMessage(async (remoteMessage) => {
+      console.log("Foreground message received!", remoteMessage);
+      
+      // Display local system heads-up notification banner if it contains notification details
+      if (remoteMessage?.notification) {
+        try {
+          const channelId = await notifee.createChannel({
+            id: "default",
+            name: "Default Channel",
+            importance: AndroidImportance.HIGH,
+          });
+
+          await notifee.displayNotification({
+            title: remoteMessage.notification.title || "Tastizo Delivery",
+            body: remoteMessage.notification.body || "",
+            android: {
+              channelId,
+              importance: AndroidImportance.HIGH,
+              pressAction: {
+                id: "default",
+                launchActivity: "default",
+              },
+            },
+          });
+        } catch (error) {
+          console.warn("Failed to display foreground local notification", error);
+        }
+      }
+
+      // Play ringtone if it's a new order or delivery assignment
+      if (remoteMessage?.data?.type === "NEW_ORDER" || remoteMessage?.data?.type === "DELIVERY_ASSIGNED" || !remoteMessage?.data?.type) {
+        await startRingtone();
+      }
+      
+      // Inject JS to notify the WebView of the incoming message in the foreground
+      if (webViewRef.current) {
+        const payloadStr = JSON.stringify(remoteMessage);
+        webViewRef.current.injectJavaScript(`
+          try {
+            // Dispatch custom events
+            window.dispatchEvent(new CustomEvent('native-push-notification', { detail: ${payloadStr} }));
+            window.dispatchEvent(new CustomEvent('ForegroundNotification', { detail: ${payloadStr} }));
+            
+            // Post window message
+            window.postMessage({
+              type: 'native-push-notification',
+              payload: ${payloadStr}
+            }, '*');
+          } catch(e) {}
+          true;
+        `);
+      }
+    });
+    
+    return unsubscribeForeground;
   }, []);
 
   React.useEffect(() => {
@@ -665,12 +841,12 @@ function AppContent() {
   }, [isFullscreenRoute, isWebViewReady]);
 
   React.useEffect(() => {
-    if (!isWebViewReady) {
+    if (!isWebViewReady && !loadError) {
       return;
     }
 
     SplashScreen.hideAsync().catch(() => {});
-  }, [isWebViewReady]);
+  }, [isWebViewReady, loadError]);
 
   const retryLoad = () => {
     setLoadError(null);
@@ -759,7 +935,9 @@ function AppContent() {
           onNavigationStateChange={(state) => {
             setCanGoBack(state.canGoBack);
             if (state.url) {
+              console.log("WebView navigating to:", state.url);
               setActiveUrl(state.url);
+              webViewRef.current?.injectJavaScript(ONLINE_STATUS_PROBE_SCRIPT);
             }
           }}
         onLoadEnd={() => {
@@ -768,6 +946,7 @@ function AppContent() {
           if (webViewRef.current) {
             webViewRef.current.injectJavaScript(HIDE_SCROLLBAR_SCRIPT);
             webViewRef.current.injectJavaScript(AUTH_PROBE_SCRIPT);
+            webViewRef.current.injectJavaScript(ONLINE_STATUS_PROBE_SCRIPT);
             if (isFullscreenRoute) {
               webViewRef.current.injectJavaScript(FULLSCREEN_ROUTE_STYLE_SCRIPT);
             }
