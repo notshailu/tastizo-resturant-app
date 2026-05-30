@@ -750,8 +750,8 @@ function AppContent() {
         }
       }
 
-      // Play ringtone if it's a new order or delivery assignment
-      if (remoteMessage?.data?.type === "NEW_ORDER" || remoteMessage?.data?.type === "DELIVERY_ASSIGNED" || !remoteMessage?.data?.type) {
+      // Play ringtone if it's a new order
+      if (remoteMessage?.data?.type === "NEW_ORDER") {
         await startRingtone();
       }
       

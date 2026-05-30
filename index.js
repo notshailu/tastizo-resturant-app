@@ -12,10 +12,7 @@ import App from "./app";
 messaging().setBackgroundMessageHandler(async remoteMessage => {
   console.log("Message handled in the background!", remoteMessage);
 
-  if (remoteMessage?.data?.type === "NEW_ORDER" || remoteMessage?.data?.type === "DELIVERY_ASSIGNED") {
-    await startRingtone();
-  } else if (!remoteMessage?.data?.type) {
-    // Fallback just in case type is not sent
+  if (remoteMessage?.data?.type === "NEW_ORDER") {
     await startRingtone();
   }
 });
