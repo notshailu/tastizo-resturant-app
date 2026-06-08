@@ -9,7 +9,6 @@ const withRNForegroundService = (config) => {
 
     // 1. Add permissions
     AndroidConfig.Permissions.addPermission(androidManifest, 'android.permission.FOREGROUND_SERVICE');
-    AndroidConfig.Permissions.addPermission(androidManifest, 'android.permission.FOREGROUND_SERVICE_DATA_SYNC');
     AndroidConfig.Permissions.addPermission(androidManifest, 'android.permission.WAKE_LOCK');
 
     // 2. Add meta-data

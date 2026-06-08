@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tastizo Delivery",
     "slug": "Tastizo delivery",
-    "version": "1.0.0",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/iconv2_padded_transparent.png",
     "scheme": "tastizo-delivery",
@@ -10,7 +10,7 @@
     "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tastizo.deliverypartner"
+      "bundleIdentifier": "com.taztizo.deliverypartner"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,7 +20,8 @@
       "edgeToEdgeEnabled": true,
       "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false,
-      "package": "com.tastizo.deliverypartner",
+      "package": "com.taztizo.deliverypartner",
+      "versionCode": 4,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",

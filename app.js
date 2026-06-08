@@ -524,8 +524,35 @@ function AppContent() {
         console.log("Could not enable high accuracy network provider", e);
       }
 
-      // Request background location permission for high accuracy tracking while app is minimized
-      await Location.requestBackgroundPermissionsAsync();
+      // Google Play Policy: Show prominent disclosure before requesting background location permission
+      const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+      if (backgroundStatus !== "granted") {
+        await new Promise((resolve) => {
+          Alert.alert(
+            "Background Location Access",
+            "Tastizo Delivery collects location data to enable real-time order matching and active delivery tracking for customers, even when the app is closed or not in use.",
+            [
+              {
+                text: "Deny",
+                style: "cancel",
+                onPress: () => resolve(false)
+              },
+              {
+                text: "Agree & Continue",
+                onPress: async () => {
+                  try {
+                    await Location.requestBackgroundPermissionsAsync();
+                  } catch (err) {
+                    console.log("Background location request error", err);
+                  }
+                  resolve(true);
+                }
+              }
+            ],
+            { cancelable: false }
+          );
+        });
+      }
 
       return true;
     } catch (error) {
@@ -725,8 +752,11 @@ function AppContent() {
       console.log("Foreground message received!", remoteMessage);
       
       // Display local system heads-up notification banner if it contains notification details
-      if (remoteMessage?.notification) {
-        try {
+      try {
+        const title = remoteMessage?.notification?.title || remoteMessage?.data?.title;
+        const body = remoteMessage?.notification?.body || remoteMessage?.data?.body;
+
+        if (title || body) {
           const channelId = await notifee.createChannel({
             id: "default",
             name: "Default Channel",
@@ -734,8 +764,8 @@ function AppContent() {
           });
 
           await notifee.displayNotification({
-            title: remoteMessage.notification.title || "Tastizo Delivery",
-            body: remoteMessage.notification.body || "",
+            title: title || "Tastizo Delivery",
+            body: body || "",
             android: {
               channelId,
               importance: AndroidImportance.HIGH,
@@ -745,9 +775,9 @@ function AppContent() {
               },
             },
           });
-        } catch (error) {
-          console.warn("Failed to display foreground local notification", error);
         }
+      } catch (error) {
+        console.warn("Failed to display foreground local notification", error);
       }
 
       // Play ringtone if it's a new order
@@ -932,6 +962,17 @@ function AppContent() {
           cacheMode="LOAD_NO_CACHE"
           sharedCookiesEnabled
           thirdPartyCookiesEnabled
+          onShouldStartLoadWithRequest={(request) => {
+            const { url } = request;
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+              return true;
+            }
+            if (url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('sms:') || url.startsWith('whatsapp:')) {
+              Linking.openURL(url).catch(err => console.log('Error opening URL', err));
+              return false;
+            }
+            return true;
+          }}
           onNavigationStateChange={(state) => {
             setCanGoBack(state.canGoBack);
             if (state.url) {
