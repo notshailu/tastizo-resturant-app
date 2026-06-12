@@ -20,25 +20,27 @@ import App from "./app";
 messaging().setBackgroundMessageHandler(async remoteMessage => {
   console.log("Message handled in the background!", remoteMessage);
 
-  // Fallback to display a local notification if the payload doesn't automatically trigger one
-  // or if it's a data-only message with title/body
+  // Fallback to display a local notification ONLY if the payload is data-only (no remoteMessage.notification)
+  // to prevent duplicate notifications when the OS automatically displays the notification block.
   try {
-    const title = remoteMessage?.notification?.title || remoteMessage?.data?.title;
-    const body = remoteMessage?.notification?.body || remoteMessage?.data?.body;
-    
-    if (title || body) {
-      await notifee.displayNotification({
-        title: title || "Tastizo Delivery",
-        body: body || "",
-        android: {
-          channelId: "default",
-          importance: AndroidImportance.HIGH,
-          pressAction: {
-            id: "default",
-            launchActivity: "default",
+    if (!remoteMessage?.notification) {
+      const title = remoteMessage?.data?.title;
+      const body = remoteMessage?.data?.body;
+      
+      if (title || body) {
+        await notifee.displayNotification({
+          title: title || "Tastizo Delivery",
+          body: body || "",
+          android: {
+            channelId: "default",
+            importance: AndroidImportance.HIGH,
+            pressAction: {
+              id: "default",
+              launchActivity: "default",
+            },
           },
-        },
-      });
+        });
+      }
     }
   } catch (error) {
     console.warn("Failed to display background local notification", error);
@@ -50,6 +52,11 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
     await new Promise(resolve => setTimeout(resolve, 30000));
     await stopRingtone();
   }
+});
+
+// Register Notifee background event handler to prevent warnings and handle events correctly
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  console.log("Notifee background event received:", type, detail);
 });
 
 registerRootComponent(App);

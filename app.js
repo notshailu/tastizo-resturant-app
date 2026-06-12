@@ -25,6 +25,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
+import { startRingtone } from "./RingtoneManager";
 
 const APP_URL = "https://tastizo.com";
 const APP_ROOT_URL = "https://tastizo.com/";
@@ -130,7 +131,6 @@ const AUTH_PROBE_SCRIPT = `
       }
 
       function postToken(token, source) {
-        if (!token) return;
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: "AUTH_TOKEN",
           token: token,
@@ -138,30 +138,85 @@ const AUTH_PROBE_SCRIPT = `
         }));
       }
 
-      for (var s = 0; s < storageSources.length; s++) {
-        var storage = storageSources[s];
-        if (!storage) continue;
+      function checkTokens() {
+        for (var s = 0; s < storageSources.length; s++) {
+          var storage = storageSources[s];
+          if (!storage) continue;
 
-        for (var i = 0; i < candidateKeys.length; i++) {
-          var key = candidateKeys[i];
-          var value = extractToken(storage.getItem(key));
-          if (value) {
-            postToken(value, key);
-            return;
-          }
-        }
-
-        for (var j = 0; j < storage.length; j++) {
-          var storageKey = storage.key(j);
-          if (!storageKey) continue;
-          if (/token|auth|jwt|bearer/i.test(storageKey)) {
-            var storageValue = extractToken(storage.getItem(storageKey));
-            if (storageValue) {
-              postToken(storageValue, storageKey);
+          for (var i = 0; i < candidateKeys.length; i++) {
+            var key = candidateKeys[i];
+            var value = extractToken(storage.getItem(key));
+            if (value) {
+              postToken(value, key);
               return;
             }
           }
+
+          for (var j = 0; j < storage.length; j++) {
+            var storageKey = storage.key(j);
+            if (!storageKey) continue;
+            if (/token|auth|jwt|bearer/i.test(storageKey)) {
+              var storageValue = extractToken(storage.getItem(storageKey));
+              if (storageValue) {
+                postToken(storageValue, storageKey);
+                return;
+              }
+            }
+          }
         }
+        postToken(null, null);
+      }
+
+      // Run immediately on page load
+      checkTokens();
+
+      // Hook storage methods to detect client-side logout/login instantly without reload
+      if (!window.__authHooked) {
+        window.__authHooked = true;
+
+        var originalSetItem = window.localStorage.setItem;
+        window.localStorage.setItem = function(key, value) {
+          originalSetItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalRemoveItem = window.localStorage.removeItem;
+        window.localStorage.removeItem = function(key) {
+          originalRemoveItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalClear = window.localStorage.clear;
+        window.localStorage.clear = function() {
+          originalClear.apply(this, arguments);
+          setTimeout(checkTokens, 50);
+        };
+
+        var originalSessionSetItem = window.sessionStorage.setItem;
+        window.sessionStorage.setItem = function(key, value) {
+          originalSessionSetItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalSessionRemoveItem = window.sessionStorage.removeItem;
+        window.sessionStorage.removeItem = function(key) {
+          originalSessionRemoveItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalSessionClear = window.sessionStorage.clear;
+        window.sessionStorage.clear = function() {
+          originalSessionClear.apply(this, arguments);
+          setTimeout(checkTokens, 50);
+        };
       }
     } catch (_error) {}
     true;
@@ -382,6 +437,7 @@ function AppContent() {
   const pendingFcmTokenRef = useRef(null);
   const lastSavedTokenKeyRef = useRef(null);
   const lastQueuedTokenRef = useRef(null);
+  const isSavingFcmTokenRef = useRef(false);
   const loginStyleAppliedRef = useRef(false);
   const webViewSource = useMemo(() => ({ uri: sourceUrl }), [sourceUrl]);
   const activePathname = useMemo(() => normalizePathname(activeUrl), [activeUrl]);
@@ -406,44 +462,44 @@ function AppContent() {
     }),
     []
   );
-
+ 
   const persistAuthToken = async (token) => {
     const normalized = normalizeAuthToken(token);
     if (!normalized) {
       return null;
     }
-
+ 
     authTokenRef.current = normalized;
     await AsyncStorage.setItem(AUTH_TOKEN_STORAGE_KEY, normalized);
     console.log("auth token stored in AsyncStorage", AUTH_TOKEN_STORAGE_KEY);
     return normalized;
   };
-
+ 
   const getStoredAuthToken = async () => {
     if (authTokenRef.current) {
       return authTokenRef.current;
     }
-
+ 
     const stored = await AsyncStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     const normalized = normalizeAuthToken(stored);
     if (normalized) {
       authTokenRef.current = normalized;
       return normalized;
     }
-
+ 
     return null;
   };
-
+ 
   const saveFcmTokenToBackend = async (token) => {
     if (!token) {
       return;
     }
-
+ 
     const payload = {
       token,
       platform: FCM_PLATFORM,
     };
-
+ 
     const authToken = await getStoredAuthToken();
     if (!authToken) {
       pendingFcmTokenRef.current = token;
@@ -453,55 +509,63 @@ function AppContent() {
       }
       return;
     }
-
+ 
     const saveKey = `${token}:${authToken}`;
     if (lastSavedTokenKeyRef.current === saveKey) {
       console.log("fcm token already saved for current auth token");
       return;
     }
 
+    if (isSavingFcmTokenRef.current) {
+      console.log("fcm token save already in progress, skipping duplicate call");
+      return;
+    }
+ 
     const headers = {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
-
+ 
     if (authToken) {
       headers.Authorization = `Bearer ${authToken}`;
       console.log("authorization header attached");
     }
-
+ 
     console.log("FCM token", token);
     console.log("FCM save payload", payload);
-
+ 
     try {
+      isSavingFcmTokenRef.current = true;
       const response = await fetch(FCM_SAVE_URL, {
         method: "POST",
         headers,
         body: JSON.stringify(payload),
       });
-
+ 
       const responseText = await response.text();
       console.log("backend save response", response.status, responseText);
-
+ 
       if (response.status === 401) {
         console.error("User not logged in, token not saved");
         pendingFcmTokenRef.current = token;
         lastQueuedTokenRef.current = token;
         return;
       }
-
+ 
       if (!response.ok) {
         console.warn("FCM token save failed", response.status, responseText);
         pendingFcmTokenRef.current = token;
         lastQueuedTokenRef.current = token;
         return;
       }
-
+ 
       lastSavedTokenKeyRef.current = saveKey;
       pendingFcmTokenRef.current = null;
       lastQueuedTokenRef.current = null;
     } catch (error) {
       console.warn("FCM token save failed", error);
+    } finally {
+      isSavingFcmTokenRef.current = false;
     }
   };
 
@@ -626,15 +690,71 @@ function AppContent() {
     try {
       const parsed = JSON.parse(raw);
       console.log("WebView message received:", parsed);
-      if (parsed?.type === "AUTH_TOKEN" && parsed.token) {
-        console.log("auth token received from WebView", parsed.source || "unknown");
-        const normalized = await persistAuthToken(parsed.token);
-        if (normalized && pendingFcmTokenRef.current) {
-          console.log("resyncing FCM token after auth token update");
-          await saveFcmTokenToBackend(pendingFcmTokenRef.current);
-        } else if (normalized && fcmTokenRef.current) {
-          console.log("resyncing FCM token after auth token update");
-          await saveFcmTokenToBackend(fcmTokenRef.current);
+      if (parsed?.type === "AUTH_TOKEN") {
+        if (parsed.token) {
+          console.log("auth token received from WebView", parsed.source || "unknown");
+          const normalized = await persistAuthToken(parsed.token);
+          if (normalized && pendingFcmTokenRef.current) {
+            console.log("resyncing FCM token after auth token update");
+            await saveFcmTokenToBackend(pendingFcmTokenRef.current);
+          } else if (normalized && fcmTokenRef.current) {
+            console.log("resyncing FCM token after auth token update");
+            await saveFcmTokenToBackend(fcmTokenRef.current);
+          }
+        } else {
+          // If token is null/empty, check if we need to clean up/logout.
+          // Check if we are on our app domain to prevent external URLs from triggering logouts.
+          const isTastizoDomain = activeUrl && (activeUrl.startsWith("https://tastizo.com") || activeUrl.startsWith("http://localhost"));
+          const storedToken = await getStoredAuthToken();
+          if (storedToken && isTastizoDomain) {
+            console.log("Detecting logout: clearing auth token and FCM token");
+            
+            // 1. Remove FCM token from backend database for the logged-out user
+            if (fcmTokenRef.current) {
+              try {
+                console.log("Removing FCM token from backend:", fcmTokenRef.current);
+                const removeUrl = `${APP_URL}/api/v1/fcm-tokens/remove/${encodeURIComponent(fcmTokenRef.current)}`;
+                const response = await fetch(removeUrl, {
+                  method: "DELETE",
+                  headers: {
+                    "Authorization": `Bearer ${storedToken}`,
+                    "Content-Type": "application/json",
+                  },
+                });
+                console.log("Backend FCM remove response:", response.status);
+              } catch (err) {
+                console.warn("Failed to remove FCM token from backend:", err);
+              }
+            }
+
+            // 2. Clear refs and AsyncStorage
+            authTokenRef.current = null;
+            await AsyncStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+            lastSavedTokenKeyRef.current = null;
+            pendingFcmTokenRef.current = null;
+            lastQueuedTokenRef.current = null;
+            
+            // 3. Delete FCM token on the device (always delete it to ensure invalidation)
+            try {
+              console.log("Deleting FCM token from device");
+              await messaging().deleteToken();
+              fcmTokenRef.current = null;
+              console.log("FCM token deleted successfully");
+            } catch (err) {
+              console.warn("Error deleting FCM token on logout", err);
+            }
+            
+            // 3. Wait 1 second to let Firebase finish deletion before setup
+            await sleep(1000);
+            
+            // 4. Register/Get a new FCM token for the device
+            try {
+              console.log("Re-setting up FCM after logout...");
+              await setupFcm();
+            } catch (err) {
+              console.warn("FCM setup after logout failed", err);
+            }
+          }
         }
       } else if (parsed?.type === "DELIVERY_STATUS") {
         if (parsed.status === "online") {
