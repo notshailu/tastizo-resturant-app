@@ -12,10 +12,11 @@ import {
   LogBox,
   ScrollView,
   RefreshControl,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import messaging from "@react-native-firebase/messaging";
-import notifee, { AndroidImportance } from "@notifee/react-native";
+import notifee, { AndroidImportance, EventType } from "@notifee/react-native";
 import ReactNativeForegroundService from "@supersami/rn-foreground-service";
 import * as SplashScreen from "expo-splash-screen";
 import * as NavigationBar from "expo-navigation-bar";
@@ -439,6 +440,21 @@ function AppContent() {
   const lastQueuedTokenRef = useRef(null);
   const isSavingFcmTokenRef = useRef(false);
   const loginStyleAppliedRef = useRef(false);
+  const touchStartTop15Ref = useRef(false);
+  const yOffsetRef = useRef(0);
+
+  const handleTouchStart = (event) => {
+    const pageY = event.nativeEvent.pageY;
+    const screenHeight = Dimensions.get("window").height;
+    const isTop15 = pageY <= screenHeight * 0.15;
+    touchStartTop15Ref.current = isTop15;
+    setCanRefresh(yOffsetRef.current <= 0 && isTop15);
+  };
+
+  const handleTouchEnd = () => {
+    touchStartTop15Ref.current = false;
+  };
+
   const webViewSource = useMemo(() => ({ uri: sourceUrl }), [sourceUrl]);
   const activePathname = useMemo(() => normalizePathname(activeUrl), [activeUrl]);
   const isLoginRoute = useMemo(
@@ -886,6 +902,7 @@ function AppContent() {
           await notifee.displayNotification({
             title: title || "Tastizo Delivery",
             body: body || "",
+            data: remoteMessage?.data || {},
             android: {
               channelId,
               importance: AndroidImportance.HIGH,
@@ -950,6 +967,38 @@ function AppContent() {
       })
       .catch(() => {});
 
+    // Listen for Notifee foreground press events
+    const unsubscribeForegroundEvent = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.PRESS) {
+        console.log("Notifee foreground event PRESS received:", detail);
+        const notification = detail.notification;
+        if (notification && notification.data) {
+          const nextUrl = resolveRemoteMessageUrl({ data: notification.data });
+          if (nextUrl) {
+            setSourceUrl(nextUrl);
+            setActiveUrl(nextUrl);
+          }
+        }
+      }
+    });
+
+    // Check if app was opened by a Notifee notification press
+    notifee.getInitialNotification()
+      .then((initialNotification) => {
+        if (initialNotification) {
+          console.log("Notifee initial notification received:", initialNotification);
+          const notification = initialNotification.notification;
+          if (notification && notification.data) {
+            const nextUrl = resolveRemoteMessageUrl({ data: notification.data });
+            if (nextUrl) {
+              setSourceUrl(nextUrl);
+              setActiveUrl(nextUrl);
+            }
+          }
+        }
+      })
+      .catch((err) => console.warn("Failed to get Notifee initial notification", err));
+
     const handleUrl = ({ url }) => {
       const nextUrl = resolveNotificationUrl(url);
       if (nextUrl) {
@@ -973,6 +1022,7 @@ function AppContent() {
     return () => {
       unsubscribeNotificationOpen();
       subscription.remove();
+      unsubscribeForegroundEvent();
     };
   }, []);
 
@@ -1051,6 +1101,9 @@ function AppContent() {
       ) : (
         <ScrollView
           contentContainerStyle={{ flex: 1 }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1070,7 +1123,8 @@ function AppContent() {
             bounces={true}
             onScroll={(event) => {
               const yOffset = event.nativeEvent.contentOffset.y;
-              setCanRefresh(yOffset <= 0);
+              yOffsetRef.current = yOffset;
+              setCanRefresh(yOffset <= 0 && touchStartTop15Ref.current);
             }}
             injectedJavaScriptBeforeContentLoaded={loginRouteInjection || undefined}
             style={{ flex: 1, backgroundColor: "#239858" }}

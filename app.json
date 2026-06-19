@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tastizo Delivery",
     "slug": "Tastizo delivery",
-    "version": "1.0.4",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/iconv2_padded_transparent.png",
     "scheme": "tastizo-delivery",
@@ -21,7 +21,7 @@
       "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false,
       "package": "com.taztizo.deliverypartner",
-      "versionCode": 5,
+      "versionCode": 7,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",

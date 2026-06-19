@@ -31,6 +31,7 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
         await notifee.displayNotification({
           title: title || "Tastizo Delivery",
           body: body || "",
+          data: remoteMessage?.data || {},
           android: {
             channelId: "default",
             importance: AndroidImportance.HIGH,
