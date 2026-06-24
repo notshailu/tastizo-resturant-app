@@ -25,6 +25,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
+import { startRingtone } from "./RingtoneManager";
 
 const APP_URL = "https://tastizo.com";
 const APP_ROOT_URL = "https://tastizo.com/";
@@ -143,7 +144,6 @@ const AUTH_PROBE_SCRIPT = `
       }
 
       function postToken(token, source) {
-        if (!token) return;
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: "AUTH_TOKEN",
           token: token,
@@ -151,32 +151,157 @@ const AUTH_PROBE_SCRIPT = `
         }));
       }
 
-      for (var s = 0; s < storageSources.length; s++) {
-        var storage = storageSources[s];
-        if (!storage) continue;
+      function checkTokens() {
+        for (var s = 0; s < storageSources.length; s++) {
+          var storage = storageSources[s];
+          if (!storage) continue;
 
-        for (var i = 0; i < candidateKeys.length; i++) {
-          var key = candidateKeys[i];
-          var value = extractToken(storage.getItem(key));
-          if (value) {
-            postToken(value, key);
-            return;
-          }
-        }
-
-        for (var j = 0; j < storage.length; j++) {
-          var storageKey = storage.key(j);
-          if (!storageKey) continue;
-          if (/token|auth|jwt|bearer/i.test(storageKey)) {
-            var storageValue = extractToken(storage.getItem(storageKey));
-            if (storageValue) {
-              postToken(storageValue, storageKey);
+          for (var i = 0; i < candidateKeys.length; i++) {
+            var key = candidateKeys[i];
+            var value = extractToken(storage.getItem(key));
+            if (value) {
+              postToken(value, key);
               return;
             }
           }
+
+          for (var j = 0; j < storage.length; j++) {
+            var storageKey = storage.key(j);
+            if (!storageKey) continue;
+            if (/token|auth|jwt|bearer/i.test(storageKey)) {
+              var storageValue = extractToken(storage.getItem(storageKey));
+              if (storageValue) {
+                postToken(storageValue, storageKey);
+                return;
+              }
+            }
+          }
         }
+        postToken(null, null);
+      }
+
+      // Run immediately on page load
+      checkTokens();
+
+      // Hook storage methods to detect client-side logout/login instantly without reload
+      if (!window.__authHooked) {
+        window.__authHooked = true;
+
+        var originalSetItem = window.localStorage.setItem;
+        window.localStorage.setItem = function(key, value) {
+          originalSetItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalRemoveItem = window.localStorage.removeItem;
+        window.localStorage.removeItem = function(key) {
+          originalRemoveItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalClear = window.localStorage.clear;
+        window.localStorage.clear = function() {
+          originalClear.apply(this, arguments);
+          setTimeout(checkTokens, 50);
+        };
+
+        var originalSessionSetItem = window.sessionStorage.setItem;
+        window.sessionStorage.setItem = function(key, value) {
+          originalSessionSetItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalSessionRemoveItem = window.sessionStorage.removeItem;
+        window.sessionStorage.removeItem = function(key) {
+          originalSessionRemoveItem.apply(this, arguments);
+          if (/token|auth|jwt|bearer/i.test(key) || candidateKeys.indexOf(key) !== -1) {
+            setTimeout(checkTokens, 50);
+          }
+        };
+
+        var originalSessionClear = window.sessionStorage.clear;
+        window.sessionStorage.clear = function() {
+          originalSessionClear.apply(this, arguments);
+          setTimeout(checkTokens, 50);
+        };
       }
     } catch (_error) {}
+    true;
+  })();
+`;
+
+const ONLINE_STATUS_PROBE_SCRIPT = `
+  (function() {
+    try {
+      function getOnlineStatus() {
+        try {
+          var val = window.localStorage.getItem("delivery-v2-online-pref");
+          if (val) {
+            var parsed = JSON.parse(val);
+            if (parsed && parsed.state && typeof parsed.state.isOnline === "boolean") {
+              return parsed.state.isOnline;
+            }
+          }
+        } catch (e) {}
+        try {
+          var val = window.localStorage.getItem("app:isOnline");
+          if (val !== null) {
+            return val === "true" || val === true;
+          }
+        } catch (e) {}
+        return false;
+      }
+
+      function getRiderName() {
+        try {
+          var userRaw = window.localStorage.getItem("delivery_user") || window.localStorage.getItem("deliveryUser") || window.localStorage.getItem("user");
+          if (userRaw) {
+            var user = JSON.parse(userRaw);
+            var profile = user?.profile || user?.deliveryPartner || user;
+            var name = profile?.fullName || profile?.firstName || profile?.name || profile?.displayName || "";
+            if (name) return name;
+          }
+        } catch(e) {}
+        return "Delivery Partner";
+      }
+
+      function checkAndPostStatus() {
+        if (!window.ReactNativeWebView) {
+          setTimeout(checkAndPostStatus, 100);
+          return;
+        }
+        var isOnline = getOnlineStatus();
+        var riderName = getRiderName();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: "DELIVERY_STATUS",
+          status: isOnline ? "online" : "offline",
+          riderName: riderName
+        }));
+      }
+
+      // 1. Initial status post
+      checkAndPostStatus();
+
+      // 2. Intercept future changes via localStorage.setItem
+      if (!window.__statusHooked) {
+        window.__statusHooked = true;
+        var originalSetItem = window.localStorage.setItem;
+        window.localStorage.setItem = function(key, value) {
+          originalSetItem.apply(this, arguments);
+          if (key === "delivery-v2-online-pref" || key === "app:isOnline" || key === "delivery_user") {
+            setTimeout(function() {
+              checkAndPostStatus();
+            }, 50);
+          }
+        };
+      }
+    } catch (e) {}
     true;
   })();
 `;
@@ -355,7 +480,23 @@ function AppContent() {
   const pendingFcmTokenRef = useRef(null);
   const lastSavedTokenKeyRef = useRef(null);
   const lastQueuedTokenRef = useRef(null);
+  const isSavingFcmTokenRef = useRef(false);
   const loginStyleAppliedRef = useRef(false);
+  const touchStartTop15Ref = useRef(false);
+  const yOffsetRef = useRef(0);
+
+  const handleTouchStart = (event) => {
+    const pageY = event.nativeEvent.pageY;
+    const screenHeight = Dimensions.get("window").height;
+    const isTop15 = pageY <= screenHeight * 0.15;
+    touchStartTop15Ref.current = isTop15;
+    setCanRefresh(yOffsetRef.current <= 0 && isTop15);
+  };
+
+  const handleTouchEnd = () => {
+    touchStartTop15Ref.current = false;
+  };
+
   const webViewSource = useMemo(() => ({ uri: sourceUrl }), [sourceUrl]);
   const activePathname = useMemo(() => normalizePathname(activeUrl), [activeUrl]);
   const isLoginRoute = useMemo(
@@ -397,38 +538,38 @@ function AppContent() {
     if (!normalized) {
       return null;
     }
-
+ 
     authTokenRef.current = normalized;
     await AsyncStorage.setItem(AUTH_TOKEN_STORAGE_KEY, normalized);
     console.log("auth token stored in AsyncStorage", AUTH_TOKEN_STORAGE_KEY);
     return normalized;
   };
-
+ 
   const getStoredAuthToken = async () => {
     if (authTokenRef.current) {
       return authTokenRef.current;
     }
-
+ 
     const stored = await AsyncStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     const normalized = normalizeAuthToken(stored);
     if (normalized) {
       authTokenRef.current = normalized;
       return normalized;
     }
-
+ 
     return null;
   };
-
+ 
   const saveFcmTokenToBackend = async (token) => {
     if (!token) {
       return;
     }
-
+ 
     const payload = {
       token,
       platform: FCM_PLATFORM,
     };
-
+ 
     const authToken = await getStoredAuthToken();
     if (!authToken) {
       pendingFcmTokenRef.current = token;
@@ -438,55 +579,63 @@ function AppContent() {
       }
       return;
     }
-
+ 
     const saveKey = `${token}:${authToken}`;
     if (lastSavedTokenKeyRef.current === saveKey) {
       console.log("fcm token already saved for current auth token");
       return;
     }
 
+    if (isSavingFcmTokenRef.current) {
+      console.log("fcm token save already in progress, skipping duplicate call");
+      return;
+    }
+ 
     const headers = {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
-
+ 
     if (authToken) {
       headers.Authorization = `Bearer ${authToken}`;
       console.log("authorization header attached");
     }
-
+ 
     console.log("FCM token", token);
     console.log("FCM save payload", payload);
-
+ 
     try {
+      isSavingFcmTokenRef.current = true;
       const response = await fetch(FCM_SAVE_URL, {
         method: "POST",
         headers,
         body: JSON.stringify(payload),
       });
-
+ 
       const responseText = await response.text();
       console.log("backend save response", response.status, responseText);
-
+ 
       if (response.status === 401) {
         console.error("User not logged in, token not saved");
         pendingFcmTokenRef.current = token;
         lastQueuedTokenRef.current = token;
         return;
       }
-
+ 
       if (!response.ok) {
         console.warn("FCM token save failed", response.status, responseText);
         pendingFcmTokenRef.current = token;
         lastQueuedTokenRef.current = token;
         return;
       }
-
+ 
       lastSavedTokenKeyRef.current = saveKey;
       pendingFcmTokenRef.current = null;
       lastQueuedTokenRef.current = null;
     } catch (error) {
       console.warn("FCM token save failed", error);
+    } finally {
+      isSavingFcmTokenRef.current = false;
     }
   };
 
@@ -496,28 +645,50 @@ function AppContent() {
     }
 
     try {
-      const fineLocationGranted = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-      );
-      const coarseLocationGranted = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION
-      );
+      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
 
-      if (fineLocationGranted || coarseLocationGranted) {
-        return true;
+      if (foregroundStatus !== "granted") {
+        return false;
       }
 
-      const result = await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
-      ]);
+      // Trigger the prompt to ask user to enable high GPS accuracy in device settings
+      try {
+        await Location.enableNetworkProviderAsync();
+      } catch (e) {
+        console.log("Could not enable high accuracy network provider", e);
+      }
 
-      return (
-        result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
-          PermissionsAndroid.RESULTS.GRANTED ||
-        result[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
-          PermissionsAndroid.RESULTS.GRANTED
-      );
+      // Google Play Policy: Show prominent disclosure before requesting background location permission
+      const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+      if (backgroundStatus !== "granted") {
+        await new Promise((resolve) => {
+          Alert.alert(
+            "Background Location Access",
+            "Tastizo Delivery collects location data to enable real-time order matching and active delivery tracking for customers, even when the app is closed or not in use.",
+            [
+              {
+                text: "Deny",
+                style: "cancel",
+                onPress: () => resolve(false)
+              },
+              {
+                text: "Agree & Continue",
+                onPress: async () => {
+                  try {
+                    await Location.requestBackgroundPermissionsAsync();
+                  } catch (err) {
+                    console.log("Background location request error", err);
+                  }
+                  resolve(true);
+                }
+              }
+            ],
+            { cancelable: false }
+          );
+        });
+      }
+
+      return true;
     } catch (error) {
       console.warn("location permission request failed", error);
       return false;
@@ -588,15 +759,109 @@ function AppContent() {
 
     try {
       const parsed = JSON.parse(raw);
-      if (parsed?.type === "AUTH_TOKEN" && parsed.token) {
-        console.log("auth token received from WebView", parsed.source || "unknown");
-        const normalized = await persistAuthToken(parsed.token);
-        if (normalized && pendingFcmTokenRef.current) {
-          console.log("resyncing FCM token after auth token update");
-          await saveFcmTokenToBackend(pendingFcmTokenRef.current);
-        } else if (normalized && fcmTokenRef.current) {
-          console.log("resyncing FCM token after auth token update");
-          await saveFcmTokenToBackend(fcmTokenRef.current);
+      console.log("WebView message received:", parsed);
+      if (parsed?.type === "AUTH_TOKEN") {
+        if (parsed.token) {
+          console.log("auth token received from WebView", parsed.source || "unknown");
+          const normalized = await persistAuthToken(parsed.token);
+          if (normalized && pendingFcmTokenRef.current) {
+            console.log("resyncing FCM token after auth token update");
+            await saveFcmTokenToBackend(pendingFcmTokenRef.current);
+          } else if (normalized && fcmTokenRef.current) {
+            console.log("resyncing FCM token after auth token update");
+            await saveFcmTokenToBackend(fcmTokenRef.current);
+          }
+        } else {
+          // If token is null/empty, check if we need to clean up/logout.
+          // Check if we are on our app domain to prevent external URLs from triggering logouts.
+          const isTastizoDomain = activeUrl && (activeUrl.startsWith("https://tastizo.com") || activeUrl.startsWith("http://localhost"));
+          const storedToken = await getStoredAuthToken();
+          if (storedToken && isTastizoDomain) {
+            console.log("Detecting logout: clearing auth token and FCM token");
+            
+            // 1. Remove FCM token from backend database for the logged-out user
+            if (fcmTokenRef.current) {
+              try {
+                console.log("Removing FCM token from backend:", fcmTokenRef.current);
+                const removeUrl = `${APP_URL}/api/v1/fcm-tokens/remove/${encodeURIComponent(fcmTokenRef.current)}`;
+                const response = await fetch(removeUrl, {
+                  method: "DELETE",
+                  headers: {
+                    "Authorization": `Bearer ${storedToken}`,
+                    "Content-Type": "application/json",
+                  },
+                });
+                console.log("Backend FCM remove response:", response.status);
+              } catch (err) {
+                console.warn("Failed to remove FCM token from backend:", err);
+              }
+            }
+
+            // 2. Clear refs and AsyncStorage
+            authTokenRef.current = null;
+            await AsyncStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+            lastSavedTokenKeyRef.current = null;
+            pendingFcmTokenRef.current = null;
+            lastQueuedTokenRef.current = null;
+            
+            // 3. Delete FCM token on the device (always delete it to ensure invalidation)
+            try {
+              console.log("Deleting FCM token from device");
+              await messaging().deleteToken();
+              fcmTokenRef.current = null;
+              console.log("FCM token deleted successfully");
+            } catch (err) {
+              console.warn("Error deleting FCM token on logout", err);
+            }
+            
+            // 3. Wait 1 second to let Firebase finish deletion before setup
+            await sleep(1000);
+            
+            // 4. Register/Get a new FCM token for the device
+            try {
+              console.log("Re-setting up FCM after logout...");
+              await setupFcm();
+            } catch (err) {
+              console.warn("FCM setup after logout failed", err);
+            }
+          }
+        }
+      } else if (parsed?.type === "DELIVERY_STATUS") {
+        if (parsed.status === "online") {
+          if (Platform.OS === "android") {
+            const hasLocation = await requestLocationPermission();
+            const hasNotification = await requestNotificationPermission();
+            
+            if (!hasLocation || !hasNotification) {
+               console.log("Missing permissions to start Foreground Service");
+               Alert.alert("Permission Required", "Please enable Notification and Location permissions to stay online.");
+               return;
+            }
+            
+            const riderDisplayName = parsed.riderName || "Delivery Partner";
+            ReactNativeForegroundService.start({
+              id: 144,
+              title: "Tastizo Delivery",
+              message: `${riderDisplayName} is online and ready to receive orders.`,
+              icon: "ic_launcher",
+              ServiceType: "location",
+              button: false,
+              button2: false,
+              setOnlyAlertOnce: true,
+              color: "#000000",
+            });
+            ReactNativeForegroundService.add_task(() => {}, {
+              delay: 1000,
+              onLoop: true,
+              taskId: "deliveryKeepAliveTask",
+              onError: (e) => console.log("Error logging:", e),
+            });
+          }
+        } else {
+          if (Platform.OS === "android") {
+            ReactNativeForegroundService.stop();
+            ReactNativeForegroundService.remove_task("deliveryKeepAliveTask");
+          }
         }
       }
     } catch (_error) {}
@@ -636,17 +901,25 @@ function AppContent() {
   React.useEffect(() => {
     let isMounted = true;
 
-    requestLocationPermission().catch((error) => {
-      if (isMounted) {
-        console.warn("location permission setup failed", error);
+    const initializePermissions = async () => {
+      try {
+        await setupFcm();
+      } catch (error) {
+        if (isMounted) {
+          console.warn("FCM setup failed", error);
+        }
       }
-    });
 
-    setupFcm().catch((error) => {
-      if (isMounted) {
-        console.warn("FCM setup failed", error);
+      try {
+        await requestLocationPermission();
+      } catch (error) {
+        if (isMounted) {
+          console.warn("location permission setup failed", error);
+        }
       }
-    });
+    };
+
+    initializePermissions();
 
     return () => {
       isMounted = false;
@@ -675,6 +948,68 @@ function AppContent() {
   }, []);
 
   React.useEffect(() => {
+    const unsubscribeForeground = messaging().onMessage(async (remoteMessage) => {
+      console.log("Foreground message received!", remoteMessage);
+      
+      // Display local system heads-up notification banner if it contains notification details
+      try {
+        const title = remoteMessage?.notification?.title || remoteMessage?.data?.title;
+        const body = remoteMessage?.notification?.body || remoteMessage?.data?.body;
+
+        if (title || body) {
+          const channelId = await notifee.createChannel({
+            id: "default",
+            name: "Default Channel",
+            importance: AndroidImportance.HIGH,
+          });
+
+          await notifee.displayNotification({
+            title: title || "Tastizo Delivery",
+            body: body || "",
+            data: remoteMessage?.data || {},
+            android: {
+              channelId,
+              importance: AndroidImportance.HIGH,
+              pressAction: {
+                id: "default",
+                launchActivity: "default",
+              },
+            },
+          });
+        }
+      } catch (error) {
+        console.warn("Failed to display foreground local notification", error);
+      }
+
+      // Play ringtone if it's a new order
+      if (remoteMessage?.data?.type === "NEW_ORDER") {
+        await startRingtone();
+      }
+      
+      // Inject JS to notify the WebView of the incoming message in the foreground
+      if (webViewRef.current) {
+        const payloadStr = JSON.stringify(remoteMessage);
+        webViewRef.current.injectJavaScript(`
+          try {
+            // Dispatch custom events
+            window.dispatchEvent(new CustomEvent('native-push-notification', { detail: ${payloadStr} }));
+            window.dispatchEvent(new CustomEvent('ForegroundNotification', { detail: ${payloadStr} }));
+            
+            // Post window message
+            window.postMessage({
+              type: 'native-push-notification',
+              payload: ${payloadStr}
+            }, '*');
+          } catch(e) {}
+          true;
+        `);
+      }
+    });
+    
+    return unsubscribeForeground;
+  }, []);
+
+  React.useEffect(() => {
     const unsubscribeNotificationOpen = messaging().onNotificationOpenedApp(
       (remoteMessage) => {
         const nextUrl = resolveRemoteMessageUrl(remoteMessage);
@@ -695,6 +1030,38 @@ function AppContent() {
         }
       })
       .catch(() => {});
+
+    // Listen for Notifee foreground press events
+    const unsubscribeForegroundEvent = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.PRESS) {
+        console.log("Notifee foreground event PRESS received:", detail);
+        const notification = detail.notification;
+        if (notification && notification.data) {
+          const nextUrl = resolveRemoteMessageUrl({ data: notification.data });
+          if (nextUrl) {
+            setSourceUrl(nextUrl);
+            setActiveUrl(nextUrl);
+          }
+        }
+      }
+    });
+
+    // Check if app was opened by a Notifee notification press
+    notifee.getInitialNotification()
+      .then((initialNotification) => {
+        if (initialNotification) {
+          console.log("Notifee initial notification received:", initialNotification);
+          const notification = initialNotification.notification;
+          if (notification && notification.data) {
+            const nextUrl = resolveRemoteMessageUrl({ data: notification.data });
+            if (nextUrl) {
+              setSourceUrl(nextUrl);
+              setActiveUrl(nextUrl);
+            }
+          }
+        }
+      })
+      .catch((err) => console.warn("Failed to get Notifee initial notification", err));
 
     const handleUrl = ({ url }) => {
       const nextUrl = resolveNotificationUrl(url);
@@ -765,12 +1132,12 @@ function AppContent() {
   }, [isFullscreenRoute, isWebViewReady]);
 
   React.useEffect(() => {
-    if (!isWebViewReady) {
+    if (!isWebViewReady && !loadError) {
       return;
     }
 
     SplashScreen.hideAsync().catch(() => {});
-  }, [isWebViewReady]);
+  }, [isWebViewReady, loadError]);
 
   const retryLoad = () => {
     setLoadError(null);
@@ -903,17 +1270,32 @@ function AppContent() {
           incognito={false}
           sharedCookiesEnabled
           thirdPartyCookiesEnabled
+          onShouldStartLoadWithRequest={(request) => {
+            const { url } = request;
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+              return true;
+            }
+            if (url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('sms:') || url.startsWith('whatsapp:')) {
+              Linking.openURL(url).catch(err => console.log('Error opening URL', err));
+              return false;
+            }
+            return true;
+          }}
           onNavigationStateChange={(state) => {
             setCanGoBack(state.canGoBack);
             if (state.url) {
+              console.log("WebView navigating to:", state.url);
               setActiveUrl(state.url);
+              webViewRef.current?.injectJavaScript(ONLINE_STATUS_PROBE_SCRIPT);
             }
           }}
         onLoadEnd={() => {
+          setRefreshing(false);
           setIsWebViewReady(true);
           if (webViewRef.current) {
             webViewRef.current.injectJavaScript(HIDE_SCROLLBAR_SCRIPT);
             webViewRef.current.injectJavaScript(AUTH_PROBE_SCRIPT);
+            webViewRef.current.injectJavaScript(ONLINE_STATUS_PROBE_SCRIPT);
             if (isFullscreenRoute) {
               webViewRef.current.injectJavaScript(FULLSCREEN_ROUTE_STYLE_SCRIPT);
             }

@@ -2,8 +2,8 @@ module.exports = {
   project: {
     android: {
       sourceDir: "./android",
-      packageName: "com.tastizo.deliverypartner",
-      applicationId: "com.tastizo.deliverypartner",
+      packageName: "com.taztizo.deliverypartner",
+      applicationId: "com.taztizo.deliverypartner",
     },
   },
   dependencies: {
