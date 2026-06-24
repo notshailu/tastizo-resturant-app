@@ -10,11 +10,16 @@ import {
   TouchableOpacity,
   View,
   LogBox,
+  ScrollView,
+  RefreshControl,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import messaging from "@react-native-firebase/messaging";
+import NetInfo from "@react-native-community/netinfo";
 import * as SplashScreen from "expo-splash-screen";
 import * as NavigationBar from "expo-navigation-bar";
+import * as Notifications from "expo-notifications";
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
@@ -23,10 +28,10 @@ import { WebView } from "react-native-webview";
 
 const APP_URL = "https://tastizo.com";
 const APP_ROOT_URL = "https://tastizo.com/";
-const APP_START_URL = "https://tastizo.com/delivery";
+const APP_START_URL = "https://tastizo.com/restaurant";
 const FCM_SAVE_URL = `${APP_URL}/api/v1/fcm-tokens/save`;
 const FCM_PLATFORM = "android";
-const AUTH_TOKEN_STORAGE_KEY = "tastizo_delivery_auth_token";
+const AUTH_TOKEN_STORAGE_KEY = "tastizo_restaurant_auth_token";
 const AUTH_TOKEN_CANDIDATE_KEYS = [
   "authToken",
   "accessToken",
@@ -44,8 +49,20 @@ const FULLSCREEN_ROUTES = ["/login", "/otp", "/splash"];
 void SplashScreen.preventAutoHideAsync();
 LogBox.ignoreLogs(["A component is changing an uncontrolled input"]);
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+  console.log("Message handled in the background!", remoteMessage);
+});
+
 const buildOrderUrl = (orderId) =>
-  `${APP_URL}/delivery/feed?orderId=${encodeURIComponent(orderId)}`;
+  `${APP_URL}/food/resturant/feed?orderId=${encodeURIComponent(orderId)}`;
 
 const resolveRemoteMessageUrl = (remoteMessage) => {
   if (!remoteMessage) {
@@ -87,8 +104,9 @@ const resolveNotificationUrl = (rawUrl) => {
     }
 
     if (
-      parsed.pathname.includes("/delivery/feed") ||
-      parsed.pathname.includes("/delivery/orders")
+      parsed.pathname.includes("/restaurant/feed") ||
+      parsed.pathname.includes("/food/resturant/feed") ||
+      parsed.pathname.includes("/restaurant/orders")
     ) {
       return `${APP_URL}${parsed.pathname}${parsed.search}`;
     }
@@ -255,6 +273,36 @@ const FULLSCREEN_ROUTE_STYLE_SCRIPT = `
   })();
 `;
 
+const REMOVE_FULLSCREEN_ROUTE_STYLE_SCRIPT = `
+  (function() {
+    try {
+      var style = document.getElementById("tastizo-fullscreen-route-style");
+      if (style && style.parentNode) {
+        style.parentNode.removeChild(style);
+      }
+
+      var candidates = [
+        document.getElementById("root"),
+        document.getElementById("__next"),
+        document.querySelector("main"),
+        document.body && document.body.firstElementChild
+      ].filter(Boolean);
+
+      candidates.forEach(function(node) {
+        node.style.marginTop = "";
+        node.style.paddingTop = "";
+        node.style.minHeight = "";
+      });
+
+      if (document.body) {
+        document.body.style.paddingTop = "";
+        document.body.style.marginTop = "";
+      }
+    } catch (_error) {}
+    true;
+  })();
+`;
+
 const normalizeAuthToken = (value) => {
   if (!value || typeof value !== "string") {
     return null;
@@ -300,6 +348,8 @@ function AppContent() {
   const [activeUrl, setActiveUrl] = useState(APP_START_URL);
   const [isWebViewReady, setIsWebViewReady] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isConnected, setIsConnected] = useState(true);
   const fcmTokenRef = useRef(null);
   const authTokenRef = useRef(null);
   const pendingFcmTokenRef = useRef(null);
@@ -309,7 +359,7 @@ function AppContent() {
   const webViewSource = useMemo(() => ({ uri: sourceUrl }), [sourceUrl]);
   const activePathname = useMemo(() => normalizePathname(activeUrl), [activeUrl]);
   const isLoginRoute = useMemo(
-    () => activePathname === "/delivery/login" || activePathname === "/login",
+    () => activePathname === "/restaurant/login" || activePathname === "/login",
     [activePathname]
   );
   const isFullscreenRoute = useMemo(
@@ -323,12 +373,24 @@ function AppContent() {
   const containerStyle = useMemo(
     () => ({
       flex: 1,
-      backgroundColor: "#239858",
-      paddingTop: 0,
+      backgroundColor: isWebViewReady ? "#ffffff" : "#299861",
+      paddingTop: isWebViewReady ? insets.top : 0,
       paddingBottom: 0,
     }),
-    []
+    [isWebViewReady, insets.top]
   );
+
+  const [isRefreshEnabled, setIsRefreshEnabled] = useState(false);
+
+  const handleTouchStart = (e) => {
+    const pageY = e.nativeEvent.pageY;
+    const { height } = Dimensions.get("window");
+    if (pageY <= height * 0.15) {
+      setIsRefreshEnabled(true);
+    } else {
+      setIsRefreshEnabled(false);
+    }
+  };
 
   const persistAuthToken = async (token) => {
     const normalized = normalizeAuthToken(token);
@@ -592,6 +654,16 @@ function AppContent() {
   }, []);
 
   React.useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsConnected(state.isConnected !== false);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  React.useEffect(() => {
     const unsubscribe = messaging().onTokenRefresh(async (token) => {
       console.log("token refresh", token);
       fcmTokenRef.current = token;
@@ -644,14 +716,42 @@ function AppContent() {
 
     const subscription = Linking.addEventListener("url", handleUrl);
 
+    const unsubscribeOnMessage = messaging().onMessage(async (remoteMessage) => {
+      console.log("Foreground message received:", remoteMessage);
+      const title = remoteMessage?.notification?.title || remoteMessage?.data?.title || "New Notification";
+      const body = remoteMessage?.notification?.body || remoteMessage?.data?.body || "You have a new message";
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: title,
+          body: body,
+          data: { url: resolveRemoteMessageUrl(remoteMessage) },
+        },
+        trigger: null,
+      });
+    });
+
+    const notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const url = response.notification.request.content.data?.url;
+      if (url) {
+        setSourceUrl(url);
+        setActiveUrl(url);
+      }
+    });
+
     return () => {
       unsubscribeNotificationOpen();
       subscription.remove();
+      unsubscribeOnMessage();
+      notificationResponseSubscription.remove();
     };
   }, []);
 
   React.useEffect(() => {
     if (!isFullscreenRoute) {
+      if (loginStyleAppliedRef.current && webViewRef.current) {
+        webViewRef.current.injectJavaScript(REMOVE_FULLSCREEN_ROUTE_STYLE_SCRIPT);
+      }
       loginStyleAppliedRef.current = false;
       return;
     }
@@ -691,10 +791,65 @@ function AppContent() {
     };
   }, []);
 
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    if (webViewRef.current) {
+      webViewRef.current.reload();
+    }
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 2000);
+  }, []);
+
   return (
-    <View style={containerStyle}>
-      <StatusBar hidden />
-      {loadError ? (
+    <View style={containerStyle} onTouchStart={handleTouchStart}>
+      <StatusBar 
+        hidden={false} 
+        translucent={true} 
+        backgroundColor="transparent" 
+        barStyle={isWebViewReady ? "dark-content" : "light-content"} 
+      />
+      {!isConnected ? (
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+            backgroundColor: "#299861",
+          }}
+        >
+          <Text style={{ fontSize: 24, fontWeight: "bold", marginBottom: 12, color: "#ffffff" }}>
+            No Connection
+          </Text>
+          <Text style={{ fontSize: 16, textAlign: "center", color: "#e6f5ec", marginBottom: 24 }}>
+            Please check your internet connection and try again.
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              NetInfo.fetch().then(state => {
+                setIsConnected(state.isConnected !== false);
+                if (state.isConnected !== false) {
+                  retryLoad();
+                }
+              });
+            }}
+            style={{
+              paddingHorizontal: 24,
+              paddingVertical: 14,
+              borderRadius: 12,
+              backgroundColor: "#ffffff",
+              elevation: 2,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+            }}
+          >
+            <Text style={{ color: "#299861", fontWeight: "bold", fontSize: 16 }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : loadError ? (
         <View
           style={{
             flex: 1,
@@ -723,17 +878,29 @@ function AppContent() {
           </TouchableOpacity>
         </View>
       ) : (
-      <WebView
-        ref={webViewRef}
+        <ScrollView
+          contentContainerStyle={{ flex: 1 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={["#299861"]}
+              enabled={isRefreshEnabled}
+            />
+          }
+        >
+          <WebView
+            ref={webViewRef}
         source={webViewSource}
         injectedJavaScriptBeforeContentLoaded={loginRouteInjection || undefined}
-        style={{ flex: 1, backgroundColor: "#239858" }}
+        style={{ flex: 1, backgroundColor: "#ffffff" }}
         userAgent={WEBVIEW_USER_AGENT}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
-          applicationNameForUserAgent="TastizoDeliveryPartner"
-          cacheEnabled
-          cacheMode="LOAD_CACHE_ELSE_NETWORK"
+          applicationNameForUserAgent="TastizoRestaurantPartner"
+          cacheEnabled={false}
+          cacheMode="LOAD_NO_CACHE"
+          incognito={false}
           sharedCookiesEnabled
           thirdPartyCookiesEnabled
           onNavigationStateChange={(state) => {
@@ -770,8 +937,11 @@ function AppContent() {
           startInLoadingState
           setSupportMultipleWindows
           androidLayerType="hardware"
-          pullToRefreshEnabled={true}
+          pullToRefreshEnabled={false}
+          nestedScrollEnabled={true}
+          bounces={true}
         />
+        </ScrollView>
       )}
     </View>
   );

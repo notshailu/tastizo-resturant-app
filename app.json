@@ -1,56 +1,45 @@
 {
   "expo": {
-    "name": "Tastizo Delivery",
-    "slug": "Tastizo delivery",
-    "version": "1.0.0",
+    "name": "Tastizo Partner",
+    "slug": "Tastizo partner",
+    "version": "0.0.3",
     "orientation": "portrait",
-    "icon": "./assets/images/iconv2.jpeg",
-    "scheme": "tastizo-delivery",
+    "icon": "./assets/images/iconv2_transparent.png",
+    "scheme": "tastizo-partner",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tastizo.deliverypartner"
+      "bundleIdentifier": "com.tastizo.restaurantpartner"
     },
     "android": {
+      "versionCode": 3,
+      "allowBackup": false,
       "adaptiveIcon": {
-        "backgroundColor": "#ffffff",
-        "foregroundImage": "./assets/images/icon.png"
+        "backgroundColor": "#299861",
+        "foregroundImage": "./assets/images/iconv2_padded_transparent.png"
       },
       "edgeToEdgeEnabled": true,
       "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false,
-      "package": "com.tastizo.deliverypartner",
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
-      ]
+      "package": "com.tastizo.restaurantpartner",
+      "permissions": []
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Allow Tastizo Delivery to use your location for tracking deliveries.",
-          "locationAlwaysPermission": "Allow Tastizo Delivery to track your location in the background for delivery assignments.",
-          "locationWhenInUsePermission": "Allow Tastizo Delivery to use your location to find nearby orders.",
-          "isAndroidBackgroundLocationEnabled": true
-        }
-      ],
       "@react-native-firebase/app",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/image.png",
+          "image": "./assets/images/icon_transparent.png",
           "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#299861",
           "dark": {
-            "backgroundColor": "#ffffff"
+            "backgroundColor": "#299861"
           }
         }
       ]
